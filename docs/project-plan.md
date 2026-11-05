@@ -67,6 +67,8 @@ Fluxo completo de criação de conta, confirmação por e-mail, login, logout e 
 ### Fase 03 — Upload e Processamento de Vídeos
 
 > Depende de: Fase 01, Fase 02
+>
+> Subprojetos: `nestjs-project` (API, worker de vídeo e infraestrutura). `next-frontend` diferido: a interface de vídeo fica para as Fases 04 e 05.
 
 Upload de arquivos grandes sem travar o sistema, processamento automático do vídeo e geração de URL única.
 
