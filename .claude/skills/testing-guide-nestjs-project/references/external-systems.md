@@ -37,89 +37,81 @@ How each external system is handled in tests. These strategies were confirmed wi
 
 ---
 
-## Object Storage — Local Filesystem
+## Object Storage — Real MinIO (Docker)
 
-**Strategy:** Local filesystem storage in development and tests. S3 in production.
+**Strategy:** Real S3-compatible storage via the Compose `minio` service in development and tests; AWS S3 in production (per `phase-03-videos/TD-02` and `phase-03-videos/TD-11`). A local-filesystem adapter is **not** used: it cannot exercise presigned multipart uploads, range (`206`) responses or the SDK checksum behavior, which are the contracts under test.
 
-**Approach:**
-- The storage layer should use an abstraction (e.g., `StorageService` interface) that allows switching between local filesystem and S3
-- In tests, use the local filesystem adapter — no mocking needed
-- Use a temporary directory for test uploads: `os.tmpdir()` or a dedicated `test-uploads/` directory
-- Clean up test files in `afterAll`
+**Test isolation:**
+- Tests use a dedicated bucket (e.g. `S3_BUCKET=streamtube-test`), created by the `minio-init` Compose service and forced by a Jest setup file loaded after `dotenv/config`.
+- Inside the test container the public signing endpoint equals the internal one (`S3_PUBLIC_ENDPOINT` = `S3_ENDPOINT`), so presigned URLs are reachable from the tests.
+- Clean the test bucket between tests with a helper that lists and deletes objects and aborts in-progress multipart uploads. The helper must **refuse to run** when the bucket name does not contain `test`.
+- Never automate a multi-gigabyte transfer: real multipart tests use parts of 5 MiB (the S3 minimum) plus a small last part; the 10 GB limit is verified at validation level.
 
-**Setup pattern:**
+**Integration test shape:**
 ```typescript
-// In test module setup
-{
-  provide: 'STORAGE_CONFIG',
-  useValue: {
-    driver: 'local',
-    basePath: path.join(os.tmpdir(), 'streamtube-test-uploads'),
-  },
-}
-```
-
-**Integration test:**
-```typescript
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
 describe('StorageService (integration)', () => {
-  const testDir = path.join(os.tmpdir(), 'streamtube-test-uploads');
-
-  afterAll(() => {
-    fs.rmSync(testDir, { recursive: true, force: true });
+  beforeEach(async () => {
+    await emptyTestBucket(); // guarded: bucket name must contain "test"
   });
 
-  it('should upload and retrieve a file', async () => {
-    const buffer = Buffer.from('test content');
-    const key = await storageService.upload(buffer, 'test.txt');
+  it('should upload parts through presigned URLs and complete the object', async () => {
+    const { uploadId } = await storageService.createMultipartUpload(key, 'video/mp4');
+    const url = await storageService.presignUploadPart(key, uploadId, 1);
+    await fetch(url, { method: 'PUT', body: partBuffer });
 
-    const retrieved = await storageService.get(key);
-    expect(retrieved.toString()).toBe('test content');
+    await storageService.completeMultipartUpload(key, uploadId);
+
+    const head = await storageService.headObject(key);
+    expect(head.contentLength).toBe(partBuffer.length);
   });
 });
 ```
 
 ---
 
-## Message Queue — Real (Docker)
+## Message Queue — Real Redis + BullMQ (Docker)
 
-**Strategy:** Real message broker in Docker. The specific technology is TBD per the architecture diagram (likely BullMQ with Redis or RabbitMQ).
+**Strategy:** Real broker via the Compose `redis` service with BullMQ (per `phase-03-videos/TD-01` and `phase-03-videos/TD-11`).
 
-**When the queue technology is chosen, configure:**
-- A queue broker service in `compose.yaml` (e.g., Redis for BullMQ, RabbitMQ for AMQP)
-- Test isolation: use dedicated test queues or clean queues between tests
-- For publisher tests: assert the job is enqueued with correct data
-- For consumer tests: submit a job and assert the processing outcome
+**Test isolation:**
+- Tests use a dedicated queue prefix (e.g. `QUEUE_PREFIX=streamtube-test`) forced by the Jest setup file, so the `video-worker` container (dev prefix) never consumes test jobs.
+- Clean the test queue between tests with a guarded helper (`obliterate` only when the prefix contains `test`).
+- For publisher tests: assert the job is enqueued with the correct name, data and `jobId`.
+- For processor tests: call `processor.process(job)` directly with a job-shaped object — no broker round-trip — and assert the outcome in the database and storage.
+- Close every `Queue`/`Worker` (`app.close()` / `module.close()`) in `afterAll`; open ioredis handles keep Jest alive.
 
-**Setup pattern (BullMQ example):**
+**Setup pattern:**
 ```typescript
-// In test module
-BullModule.forRoot({
-  connection: {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-  },
+BullModule.forRootAsync({
+  inject: [queueConfig.KEY],
+  useFactory: (cfg: ConfigType<typeof queueConfig>) => ({
+    connection: { host: cfg.host, port: cfg.port },
+    prefix: cfg.prefix, // streamtube-test in tests
+  }),
 }),
 BullModule.registerQueue({ name: 'video-processing' }),
 ```
 
 ```typescript
-describe('VideoService (integration - queue)', () => {
-  it('should enqueue a processing job on upload', async () => {
-    await videoService.upload(videoData);
+it('should enqueue a processing job when the upload completes', async () => {
+  await videosService.completeUpload(owner, publicId);
 
-    const queue = module.get<Queue>(getQueueToken('video-processing'));
-    const jobs = await queue.getJobs(['waiting']);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].data).toEqual(
-      expect.objectContaining({ videoId: expect.any(String) }),
-    );
-  });
+  const queue = module.get<Queue>(getQueueToken('video-processing'));
+  const jobs = await queue.getJobs(['waiting']);
+  expect(jobs.map((j) => j.data)).toEqual([{ videoId: video.id }]);
 });
 ```
+
+---
+
+## Video Worker and FFmpeg — Real binaries
+
+**Strategy:** `ffprobe`/`ffmpeg` are installed in the shared dev image and run for real in integration and e2e tests (per `phase-03-videos/TD-06` and `phase-03-videos/TD-11`).
+
+- Generate fixtures at test time with `ffmpeg -f lavfi` into `os.tmpdir()` of the container (e.g. a few seconds of `testsrc` + `sine`, a faststart MP4, an MP4 with the moov atom at the end, random bytes, audio-only). Do not commit binary fixtures.
+- Fail fast in `beforeAll` when `ffprobe -version` is not available (the image must be rebuilt after the Dockerfile change).
+- E2E boots the worker module **in-process** (same test prefix and database) so processing always runs the current code; the `video-worker` container is verified separately by a liveness test (a worker is registered on the dev queue).
+- The processor must be a no-op for a video that no longer exists, because test suites delete rows from the shared database.
 
 ---
 
