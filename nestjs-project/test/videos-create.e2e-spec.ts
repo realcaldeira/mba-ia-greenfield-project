@@ -114,7 +114,8 @@ describe('videos-create', () => {
       Math.abs(Number(row.window_seconds) - 24 * 3600),
     ).toBeLessThanOrEqual(1);
 
-    const put = await putPart(body.parts[0].url, 1024);
+    // The URL signs the part length: part 1 of a 2-part file is exactly 64 MiB.
+    const put = await putPart(body.parts[0].url, body.part_size);
     expect(put.status).toBe(200);
     expect(put.headers.get('etag')).toBeTruthy();
   });

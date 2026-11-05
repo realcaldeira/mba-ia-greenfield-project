@@ -144,6 +144,29 @@ describe('MediaProbeService (integration)', () => {
     );
   });
 
+  it('should reject an HLS playlist disguised as MP4 before it opens the URLs it lists', async () => {
+    const playlist = [
+      '#EXTM3U',
+      '#EXT-X-TARGETDURATION:1',
+      '#EXTINF:1,',
+      'file:///etc/passwd',
+      '#EXTINF:1,',
+      'http://redis:6379/segment.ts',
+      '#EXT-X-ENDLIST',
+      '',
+    ].join('\n');
+    const key = originalKey(randomUUID());
+    await storage.putObject(key, Buffer.from(playlist), 'video/mp4');
+    const url = await storage.presignGetObject(key, {
+      expiresIn: 3600,
+      audience: 'internal',
+    });
+
+    await expect(probeService.probe(url)).rejects.toBeInstanceOf(
+      UnsupportedMediaError,
+    );
+  });
+
   it('should fail with a transient error, not UnsupportedMediaError, when the key does not exist', async () => {
     const url = await storage.presignGetObject(originalKey(randomUUID()), {
       expiresIn: 3600,

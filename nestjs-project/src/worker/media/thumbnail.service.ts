@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { StorageService } from '../../storage/storage.service';
 import { thumbnailKey } from '../../videos/video-storage-keys';
-import { MEDIA_PROCESS_TIMEOUT_MS } from './media.constants';
+import {
+  MEDIA_INPUT_GUARD_ARGS,
+  MEDIA_PROCESS_TIMEOUT_MS,
+} from './media.constants';
 import { MediaProcessingError } from './media.errors';
 import { runProcess, type ProcessResult } from './process-runner';
 import { thumbnailTimeSeconds } from './thumbnail-time.util';
@@ -59,6 +62,7 @@ export class ThumbnailService {
         'error',
         '-ss',
         String(timeSeconds),
+        ...MEDIA_INPUT_GUARD_ARGS,
         '-i',
         url,
         '-frames:v',

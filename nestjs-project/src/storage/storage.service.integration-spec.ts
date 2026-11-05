@@ -82,12 +82,14 @@ describe('StorageService (integration)', () => {
         key,
         uploadId,
         1,
+        FIRST_PART_BYTES,
         URL_TTL_SECONDS,
       );
       const lastUrl = await storage.presignUploadPart(
         key,
         uploadId,
         2,
+        LAST_PART_BYTES,
         URL_TTL_SECONDS,
       );
       expect(firstUrl).not.toMatch(/x-amz-checksum|x-amz-sdk-checksum/i);
@@ -121,6 +123,7 @@ describe('StorageService (integration)', () => {
         key,
         uploadId,
         1,
+        LAST_PART_BYTES,
         URL_TTL_SECONDS,
       );
       expect((await putPart(url, randomBytes(LAST_PART_BYTES))).status).toBe(
@@ -153,9 +156,37 @@ describe('StorageService (integration)', () => {
       const key = newVideoKey();
       const uploadId = await storage.createMultipartUpload(key, 'video/mp4');
 
-      const url = await storage.presignUploadPart(key, uploadId, 1, 60);
+      const url = await storage.presignUploadPart(
+        key,
+        uploadId,
+        1,
+        LAST_PART_BYTES,
+        60,
+      );
 
       expect(new URL(url).host).toBe(new URL(cfg.publicEndpoint).host);
+    });
+
+    it('should refuse a part whose body size differs from the signed length', async () => {
+      const key = newVideoKey();
+      const uploadId = await storage.createMultipartUpload(key, 'video/mp4');
+      const url = await storage.presignUploadPart(
+        key,
+        uploadId,
+        1,
+        LAST_PART_BYTES,
+        URL_TTL_SECONDS,
+      );
+
+      const larger = await putPart(url, randomBytes(LAST_PART_BYTES + 1));
+      const smaller = await putPart(url, randomBytes(LAST_PART_BYTES - 1));
+
+      expect(new URL(url).searchParams.get('X-Amz-SignedHeaders')).toContain(
+        'content-length',
+      );
+      expect(larger.status).toBe(403);
+      expect(smaller.status).toBe(403);
+      await expect(storage.listParts(key, uploadId)).resolves.toEqual([]);
     });
   });
 
@@ -275,6 +306,7 @@ describe('StorageService (integration)', () => {
           key,
           uploadId,
           index + 1,
+          size,
           URL_TTL_SECONDS,
         );
         expect((await putPart(url, randomBytes(size))).status).toBe(200);

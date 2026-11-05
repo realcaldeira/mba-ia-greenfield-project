@@ -120,10 +120,10 @@ describe('videos-upload-complete', () => {
   it('partes-faltando-409-upload-incomplete', async () => {
     const session = await createVideo(app, userA.accessToken, {
       file_name: 'clip.mp4',
-      file_size: 134217728,
+      file_size: PART_SIZE + 1024,
       content_type: 'video/mp4',
     });
-    expect((await putPart(session.parts[0].url, FIVE_MIB)).status).toBe(200);
+    expect((await putPart(session.parts[0].url, PART_SIZE)).status).toBe(200);
 
     const res = await complete(session.public_id, userA).expect(409);
     expect(res.body).toEqual({
@@ -142,40 +142,42 @@ describe('videos-upload-complete', () => {
     expect(await jobsOf(id)).toHaveLength(0);
   });
 
-  it('tamanho-divergente-409-upload-size-mismatch', async () => {
+  it('tamanho-divergente-recusado-pelo-storage-409-upload-incomplete', async () => {
     const session = await createVideo(app, userA.accessToken, {
       file_name: 'clip.mp4',
       file_size: 2048,
       content_type: 'video/mp4',
     });
-    expect((await putPart(session.parts[0].url, 1024)).status).toBe(200);
+    // The part URL signs content-length 2048: a 1024-byte body never lands.
+    expect((await putPart(session.parts[0].url, 1024)).status).toBe(403);
 
     const res = await complete(session.public_id, userA).expect(409);
-    expect(bodyOf<ApiErrorEnvelope>(res).error).toBe('UPLOAD_SIZE_MISMATCH');
+    expect(bodyOf<ApiErrorEnvelope>(res).error).toBe('UPLOAD_INCOMPLETE');
 
     const row = await videoRowOf(dataSource, session.public_id);
     expect(row).toMatchObject({ status: 'draft', processing_error: null });
     expect(await jobsOf(row.id)).toHaveLength(0);
   });
 
-  it('partes-fora-do-part-size-409-upload-size-mismatch', async () => {
+  it('partes-fora-do-part-size-recusadas-pelo-storage-409-upload-incomplete', async () => {
     const size = PART_SIZE + 1024;
     const session = await createVideo(app, userA.accessToken, {
       file_name: 'clip.mp4',
       file_size: size,
       content_type: 'video/mp4',
     });
-    // Same total, valid for S3, but not the 64 MiB split of the URLs.
-    expect((await putPart(session.parts[0].url, FIVE_MIB)).status).toBe(200);
+    // Same total, valid for S3, but not the 64 MiB split signed into the URLs:
+    // the storage refuses both bodies, so nothing beyond the declared size lands.
+    expect((await putPart(session.parts[0].url, FIVE_MIB)).status).toBe(403);
     expect((await putPart(session.parts[1].url, size - FIVE_MIB)).status).toBe(
-      200,
+      403,
     );
 
     const res = await complete(session.public_id, userA).expect(409);
     expect(res.body).toEqual({
       statusCode: 409,
-      error: 'UPLOAD_SIZE_MISMATCH',
-      message: 'Uploaded size does not match the declared size',
+      error: 'UPLOAD_INCOMPLETE',
+      message: 'Upload has missing or non-contiguous parts',
     });
 
     const row = await videoRowOf(dataSource, session.public_id);

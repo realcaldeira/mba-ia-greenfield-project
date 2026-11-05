@@ -96,6 +96,7 @@ describe('VideosService (integration)', () => {
       originalKey(video.id),
       video.upload_id,
       partNumber,
+      size,
       600,
     );
     const res = await fetch(url, { method: 'PUT', body: new Uint8Array(size) });
@@ -392,6 +393,7 @@ describe('VideosService (integration)', () => {
         originalKey(draft.id),
         draft.upload_id,
         1,
+        5 * 1024 * 1024,
         600,
       );
       const put = await fetch(firstUrl, {

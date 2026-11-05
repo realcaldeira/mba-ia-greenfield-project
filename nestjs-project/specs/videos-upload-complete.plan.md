@@ -46,7 +46,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 **Last sync:** 2026-11-05T02:54:25Z
 
 **Steps:**
-  1. POST /videos com `file_size: 134217728` (`part_count: 2`) e PUT de 5 MiB só na parte 1
+  1. POST /videos com `file_size: 67109888` (`part_count: 2`) e PUT de 67108864 bytes só na parte 1
   2. POST /videos/{publicId}/upload/complete com o token de A
     - expect: status `409` com body `{ statusCode: 409, error: "UPLOAD_INCOMPLETE", message: "Upload has missing or non-contiguous parts" }`
   3. GET /videos/{publicId} com o token de A
@@ -54,7 +54,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
   4. Inspeciona a fila
     - expect: nenhum job para o vídeo
 
-#### 1.3. tamanho-divergente-409-upload-size-mismatch
+#### 1.3. tamanho-divergente-recusado-pelo-storage-409-upload-incomplete
 
 **Covers AC:** #3
 **Source:** auto
@@ -62,8 +62,9 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Steps:**
   1. POST /videos com `file_size: 2048` (`part_count: 1`) e PUT de 1024 bytes na parte 1
+    - expect: o storage recusa o PUT com `403`, porque a URL da parte assina `content-length: 2048`
   2. POST /videos/{publicId}/upload/complete com o token de A
-    - expect: status `409` com `error: "UPLOAD_SIZE_MISMATCH"`
+    - expect: status `409` com `error: "UPLOAD_INCOMPLETE"`, porque nenhuma parte foi gravada
   3. Consulta `SELECT status, processing_error FROM videos WHERE public_id = $1`
     - expect: `draft` e `null`
   4. Inspeciona a fila

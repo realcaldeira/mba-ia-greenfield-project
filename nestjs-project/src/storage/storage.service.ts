@@ -272,10 +272,13 @@ export class StorageService {
     );
   }
 
+  // The part length is part of the signature: the storage rejects a PUT whose
+  // body has any other size, so a client cannot store more than it declared.
   async presignUploadPart(
     key: string,
     uploadId: string,
     partNumber: number,
+    contentLength: number,
     expiresIn: number,
   ): Promise<string> {
     return getSignedUrl(
@@ -285,8 +288,9 @@ export class StorageService {
         Key: key,
         UploadId: uploadId,
         PartNumber: partNumber,
+        ContentLength: contentLength,
       }),
-      { expiresIn },
+      { expiresIn, signableHeaders: new Set(['content-length']) },
     );
   }
 

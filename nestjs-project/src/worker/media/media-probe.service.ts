@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { MEDIA_PROCESS_TIMEOUT_MS } from './media.constants';
+import {
+  MEDIA_INPUT_GUARD_ARGS,
+  MEDIA_PROCESS_TIMEOUT_MS,
+} from './media.constants';
 import { MediaProcessingError, UnsupportedMediaError } from './media.errors';
 import { parseProbeOutput, type ProbeResult } from './probe-parser';
 import { runProcess } from './process-runner';
 
-// ffprobe's message when the bytes match no known format.
-const INVALID_DATA_PATTERN = /Invalid data found when processing input/i;
+// ffprobe's messages when the bytes match no known format, or only a demuxer
+// outside the allowlist.
+const UNSUPPORTED_INPUT_PATTERN =
+  /Invalid data found when processing input|Format not on whitelist/i;
 
 function parseJson(stdout: Buffer): unknown {
   try {
@@ -36,14 +41,15 @@ export class MediaProbeService {
         'json',
         '-show_format',
         '-show_streams',
+        ...MEDIA_INPUT_GUARD_ARGS,
         url,
       ],
       { timeoutMs: MEDIA_PROCESS_TIMEOUT_MS },
     );
 
     if (result.exitCode !== 0) {
-      if (INVALID_DATA_PATTERN.test(result.stderr)) {
-        throw new UnsupportedMediaError('unrecognized data');
+      if (UNSUPPORTED_INPUT_PATTERN.test(result.stderr)) {
+        throw new UnsupportedMediaError('unrecognized or disallowed container');
       }
       throw new MediaProcessingError(
         'ffprobe',

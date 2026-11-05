@@ -26,6 +26,7 @@ import {
 import { buildAttachmentDisposition } from './content-disposition.util';
 import { streamTtlSeconds } from './media-url.util';
 import { generatePublicId } from './public-id.util';
+import { partCount, partLength } from './upload-parts.util';
 import { originalKey } from './video-storage-keys';
 import {
   DOWNLOAD_TTL_SECONDS,
@@ -276,10 +277,10 @@ export class VideosService {
     video: Video,
     parts: UploadedPart[],
   ): Promise<void> {
-    const partCount = Math.ceil(video.size_bytes / UPLOAD_PART_SIZE_BYTES);
+    const count = partCount(video.size_bytes);
     const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
     const contiguous =
-      sorted.length === partCount &&
+      sorted.length === count &&
       sorted.every((part, index) => part.partNumber === index + 1);
     if (!contiguous) {
       throw new UploadIncompleteException();
@@ -483,10 +484,10 @@ export class VideosService {
     video: Video,
     uploadedParts: number[],
   ): Promise<UploadSessionResponseDto> {
-    const partCount = Math.ceil(video.size_bytes / UPLOAD_PART_SIZE_BYTES);
+    const count = partCount(video.size_bytes);
     const uploaded = new Set(uploadedParts);
     const missing = Array.from(
-      { length: partCount },
+      { length: count },
       (_, index) => index + 1,
     ).filter((partNumber) => !uploaded.has(partNumber));
 
@@ -498,6 +499,7 @@ export class VideosService {
           key,
           video.upload_id,
           partNumber,
+          partLength(video.size_bytes, partNumber),
           PART_URL_TTL_SECONDS,
         ),
       })),
@@ -508,9 +510,9 @@ export class VideosService {
       title: video.title,
       status: video.status,
       part_size: UPLOAD_PART_SIZE_BYTES,
-      part_count: partCount,
+      part_count: count,
       uploaded_parts: [...uploaded]
-        .filter((partNumber) => partNumber >= 1 && partNumber <= partCount)
+        .filter((partNumber) => partNumber >= 1 && partNumber <= count)
         .sort((a, b) => a - b),
       parts,
       parts_expire_at: secondsFromNow(PART_URL_TTL_SECONDS).toISOString(),

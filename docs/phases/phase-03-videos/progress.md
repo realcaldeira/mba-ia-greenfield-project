@@ -280,7 +280,7 @@ Correções de um code review da fase, rodadas em 2026-11-05. Cada item tem test
      - Unit: partes fora do tamanho, última parte menor e igual, rejeição do storage, e 5xx na montagem continuando `STORAGE_UNAVAILABLE`.
      - Integration do storage: os 3 códigos gerados de verdade no MinIO.
      - Integration do service: partes `[5 MiB, resto]` → `UPLOAD_SIZE_MISMATCH`, com as partes ainda listadas. Um ETag obsoleto gera `InvalidPart` real → `UPLOAD_INCOMPLETE`.
-     - E2E `partes-fora-do-part-size-409-upload-size-mismatch`.
+     - E2E `partes-fora-do-part-size-409-upload-size-mismatch`. Depois do item 12 da revisão de segurança, o storage barra essas partes no PUT, e o cenário virou `partes-fora-do-part-size-recusadas-pelo-storage-409-upload-incomplete`.
 7. **`add()` pendurado com o Redis fora no boot.**
    - **O que mudou:**
      - O `enqueue` inteiro (`getJob`, `remove` e `add`) passa por um `Promise.race` com timeout configurável: `QUEUE_ENQUEUE_TIMEOUT_MS`, default 5000 no Joi e no `queue.config.ts` (`enqueueTimeoutMs`), adicionado ao `.env.example` e ao `.env`.
@@ -343,3 +343,37 @@ Correções de um code review da fase, rodadas em 2026-11-05. Cada item tem test
 | Build do worker | `npm run build:worker` | exit 0, `dist-worker/worker/main.js` |
 | Worker | `docker compose restart video-worker` | `Up`; log `Video worker started: queue "video-processing", prefix "streamtube", concurrency 1` depois do restart |
 | OpenAPI | `npm run openapi:export` | `POST /videos` com `404`; `GET /videos/{publicId}`, `/stream` e `/download` com `503` |
+
+### Security review fixes
+
+Correções de uma revisão de segurança do código publicado, rodada em 2026-11-05. Cada uma tem uma Revision em `technical-decisions-phase-03-videos.md`.
+
+12. **A URL de cada parte não limitava o tamanho do corpo** (Revision de 2026-11-05 no TD-03).
+    - **Risco:** quem tem as URLs das partes podia gravar em cada uma até o limite por parte do storage, muito além do `file_size` declarado. O excesso só sumia na expiração de 24 h dos uploads abandonados (TD-12), e a pré-checagem do `complete` rodava tarde demais para evitar o consumo de disco.
+    - **O que mudou:**
+      - `StorageService.presignUploadPart` recebe o tamanho da parte e assina a URL com `ContentLength` e `signableHeaders: new Set(['content-length'])`, como na doc do `@aws-sdk/s3-request-presigner` 3.1162 consultada pelo context7. O `X-Amz-SignedHeaders` passa a ser `content-length;host`, e o MinIO responde `403` a um corpo com qualquer outro tamanho.
+      - O novo `src/videos/upload-parts.util.ts` (`partCount`, `partLength`) calcula o tamanho exato de cada parte: `part_size` em todas, exceto a última, que leva o resto. O `VideosService` usa o util na sessão de upload e na pré-checagem do `complete`.
+      - O contrato da API não mudou. O cliente já fatiava o arquivo em `part_size`, e a pré-checagem `UPLOAD_SIZE_MISMATCH` fica como defesa em profundidade.
+    - **Testes:**
+      - Unit: `upload-parts.util.spec.ts`, com 11 casos, entre eles o limite de 10 GiB = 160 partes, a última parte com resto e parte fora de `1..part_count`. Em `videos.service.spec.ts`, o tamanho assinado na parte 160 do arquivo de 10 GiB e nas partes 1 e 2 de 64 MiB + 1 byte.
+      - Integration com MinIO real (`storage.service.integration-spec.ts`): um corpo 1 byte maior ou menor que o assinado recebe `403`, e nenhuma parte fica listada.
+      - E2E: os cenários que enviavam partes menores que as assinadas agora usam o tamanho exato (`videos-create` 1.1, `videos-upload-resume` 1.1 e `videos-upload-complete` 1.2, com specs atualizadas). O `videos-upload-complete` 1.3 virou `tamanho-divergente-recusado-pelo-storage-409-upload-incomplete`: o PUT com o tamanho errado recebe `403`, e o `complete` responde `409 UPLOAD_INCOMPLETE`.
+    - **Follow-up:** um limite de rascunhos simultâneos por usuário fica para a fase de gerenciamento de vídeos.
+13. **ffprobe e ffmpeg abriam o original sem restringir o formato nem os protocolos** (Revision de 2026-11-05 no TD-06).
+    - **Risco:** o allowlist de containers do `probe-parser` só rodava sobre a saída do ffprobe, depois que um demuxer já tinha interpretado o arquivo. Uma playlist HLS salva como `.mp4` levaria o worker a abrir as URLs e os arquivos locais listados nela (SSRF e leitura de arquivo local).
+    - **O que mudou:** a nova constante `MEDIA_INPUT_GUARD_ARGS`, em `src/worker/media/media.constants.ts`, com `-protocol_whitelist http,https,tcp,tls -format_whitelist mov,mp4,matroska,webm`, vai antes da URL em todo `ffprobe` (`MediaProbeService`) e `ffmpeg` (`ThumbnailService`). O `Format not on whitelist` do ffprobe passou a ser `UnsupportedMediaError`, ou seja, `UNSUPPORTED_MEDIA` sem retry, como o `Invalid data found`. O allowlist pós-probe continua como defesa em profundidade.
+    - **Conferido no container:**
+      - MP4 faststart, M4A e WebM continuam aceitos.
+      - Bytes aleatórios seguem como `Invalid data`.
+      - Uma playlist HLS com `file:///etc/passwd` é barrada com `[hls] Format not on whitelist` antes de qualquer abertura.
+    - **Testes:** integration com MinIO e FFmpeg reais (`media-probe.service.integration-spec.ts`). Uma playlist HLS gravada como original, apontando para `file:///etc/passwd` e `http://redis:6379`, é rejeitada com `UnsupportedMediaError`.
+
+**Gate (2026-11-05, dentro do container, com o `video-worker` em execução):**
+
+| Check | Comando | Resultado |
+|-------|---------|-----------|
+| Unit + integration | `npm test` | 48/48 suítes, 432/432 testes, exit 0 |
+| E2E | `npm run test:e2e` | 10/10 suítes, 96/96 testes, exit 0 |
+| Type-check | `npx tsc --noEmit` | exit 0 |
+| Lint | `npm run lint` | exit 0 |
+

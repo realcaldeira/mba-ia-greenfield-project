@@ -19,7 +19,7 @@ import { registerConfirmAndLogin, type LoggedInUser } from './utils/auth';
 import { bodyOf, createE2eApp } from './utils/e2e-app';
 import { createVideo, putPart, videoRowOf } from './utils/videos';
 
-const FIVE_MIB = 5 * 1024 * 1024;
+const PART_SIZE = 67108864;
 
 const VIDEO_NOT_FOUND = {
   statusCode: 404,
@@ -74,7 +74,7 @@ describe('videos-upload-resume', () => {
   it('retomada-mostra-so-as-partes-que-faltam', async () => {
     const initiated = await createVideo(app, userA.accessToken, {
       file_name: 'aula.mp4',
-      file_size: 134217728,
+      file_size: PART_SIZE + 1024,
       content_type: 'video/mp4',
     });
     expect(initiated.part_count).toBe(2);
@@ -84,7 +84,7 @@ describe('videos-upload-resume', () => {
     expect(untouched.uploaded_parts).toEqual([]);
     expect(untouched.parts.map((p) => p.part_number)).toEqual([1, 2]);
 
-    const firstPart = await putPart(initiated.parts[0].url, FIVE_MIB);
+    const firstPart = await putPart(initiated.parts[0].url, PART_SIZE);
     expect(firstPart.status).toBe(200);
     await delay(1100);
 

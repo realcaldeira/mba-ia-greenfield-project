@@ -145,7 +145,7 @@ describe('VideosService', () => {
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       presignUploadPart: jest.fn<
         Promise<string>,
-        [string, string, number, number]
+        [string, string, number, number, number]
       >((key, _uploadId, partNumber) =>
         Promise.resolve(`http://minio:9000/${key}?partNumber=${partNumber}`),
       ),
@@ -342,6 +342,7 @@ describe('VideosService', () => {
         expect.any(String),
         UPLOAD_ID,
         160,
+        67108864,
         3600,
       );
     });
@@ -353,6 +354,20 @@ describe('VideosService', () => {
       );
 
       expect(session.part_count).toBe(2);
+      expect(storage.presignUploadPart).toHaveBeenCalledWith(
+        expect.any(String),
+        UPLOAD_ID,
+        1,
+        67108864,
+        3600,
+      );
+      expect(storage.presignUploadPart).toHaveBeenCalledWith(
+        expect.any(String),
+        UPLOAD_ID,
+        2,
+        1,
+        3600,
+      );
     });
 
     it('should return the part URLs expiry one hour ahead and the 24 h upload window', async () => {

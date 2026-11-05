@@ -36,7 +36,7 @@ target_file: test/videos-create.e2e-spec.ts
     - expect: uma linha com `channel_id` igual ao `Channel.id` cujo `user_id` é o `id` do usuário A
     - expect: `original_filename = 'Minhas Férias.mp4'`, `mime_type = 'video/mp4'`, `size_bytes = 134217728`, `status = 'draft'`, `processing_error = null` e `upload_id` preenchido
     - expect: `upload_expires_at - created_at` = 24 h (tolerância de 1 s)
-  3. PUT direto na `url` da parte 1 (`fetch(url, { method: 'PUT', body: Buffer.alloc(1024) })`), sem header `x-amz-checksum-*`
+  3. PUT direto na `url` da parte 1 com exatamente `part_size` bytes (`fetch(url, { method: 'PUT', body: Buffer.alloc(67108864) })`, o tamanho assinado na URL), sem header `x-amz-checksum-*`
     - expect: status `200` do storage, com `ETag`
 
 #### 1.2. limite-de-tamanho-10-gib

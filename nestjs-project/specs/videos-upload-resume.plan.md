@@ -25,11 +25,11 @@ target_file: test/videos-upload-resume.e2e-spec.ts
 **Last sync:** 2026-11-05T02:54:25Z
 
 **Steps:**
-  1. POST /videos com o token de A e `{ file_name: 'aula.mp4', file_size: 134217728, content_type: 'video/mp4' }`
+  1. POST /videos com o token de A e `{ file_name: 'aula.mp4', file_size: 67109888, content_type: 'video/mp4' }` (64 MiB + 1 KiB)
     - expect: `201` com `part_count: 2`, e o `parts_expire_at` da iniciação é guardado
   2. GET /videos/{publicId}/upload antes de qualquer PUT
     - expect: `200` com `uploaded_parts: []` e `parts` com `part_number` `1` e `2`
-  3. PUT de 5 MiB na `url` da parte 1 e espera de 1,1 s
+  3. PUT de 67108864 bytes (o tamanho assinado na URL) na `url` da parte 1 e espera de 1,1 s
     - expect: status `200` do storage
   4. GET /videos/{publicId}/upload com o token de A
     - expect: status `200` com `uploaded_parts: [1]`
