@@ -1,6 +1,5 @@
-import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { randomUUID } from 'node:crypto';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
   cleanAllTables,
   createTestDataSource,
@@ -8,8 +7,7 @@ import {
 import { User } from '../users/entities/user.entity';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
-
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+import { ALL_ENTITIES } from '../test/test-entities';
 
 describe('ChannelsService (integration)', () => {
   let dataSource: DataSource;
@@ -42,6 +40,34 @@ describe('ChannelsService (integration)', () => {
       }),
     );
   }
+
+  describe('findByUserId', () => {
+    it('returns the channel owned by the user', async () => {
+      const user = await createUser();
+      const created = await channelsService.createChannel(
+        user.id,
+        'owner@example.com',
+      );
+
+      const channel = await channelsService.findByUserId(user.id);
+
+      expect(channel).not.toBeNull();
+      expect(channel!.id).toBe(created.id);
+      expect(channel!.user_id).toBe(user.id);
+    });
+
+    it('returns null for a user without a channel', async () => {
+      const user = await createUser();
+
+      await expect(channelsService.findByUserId(user.id)).resolves.toBeNull();
+    });
+
+    it('returns null for a uuid that matches no user', async () => {
+      await expect(
+        channelsService.findByUserId(randomUUID()),
+      ).resolves.toBeNull();
+    });
+  });
 
   describe('createChannel', () => {
     it('persists a channel derived from email', async () => {
@@ -87,6 +113,33 @@ describe('ChannelsService (integration)', () => {
 
       const channels = await channelRepository.find();
       expect(channels).toHaveLength(2);
+    });
+
+    it('retries after a real unique violation inside the same transaction', async () => {
+      const user1 = await createUser();
+      const user2 = await createUser();
+      await channelsService.createChannel(user1.id, 'race@example.com');
+
+      // Simulate a concurrent insert: the pre-check misses the existing nickname,
+      // so the first save hits the unique constraint in Postgres.
+      const findOneSpy = jest
+        .spyOn(EntityManager.prototype, 'findOne')
+        .mockResolvedValueOnce(null);
+
+      try {
+        const channel2 = await channelsService.createChannel(
+          user2.id,
+          'race@example.com',
+        );
+
+        expect(channel2.nickname).toMatch(/^race_[a-z0-9]{3}$/);
+        const persisted = await channelRepository.findOneBy({
+          user_id: user2.id,
+        });
+        expect(persisted?.nickname).toBe(channel2.nickname);
+      } finally {
+        findOneSpy.mockRestore();
+      }
     });
   });
 });

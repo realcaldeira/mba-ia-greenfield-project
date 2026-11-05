@@ -21,4 +21,23 @@ export const envValidationSchema = Joi.object({
   MAIL_PORT: Joi.number().default(1025),
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  // An explicit scheme list: a bare `uri()` accepts `minio:9000` (scheme `minio`).
+  S3_ENDPOINT: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('http://minio:9000'),
+  S3_PUBLIC_ENDPOINT: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('http://minio:9000'),
+  S3_REGION: Joi.string().default('us-east-1'),
+  S3_BUCKET: Joi.string().default('streamtube'),
+  S3_ACCESS_KEY_ID: Joi.string().required(),
+  S3_SECRET_ACCESS_KEY: Joi.string().required(),
+  REDIS_HOST: Joi.string().default('redis'),
+  REDIS_PORT: Joi.number().port().default(6379),
+  QUEUE_PREFIX: Joi.string()
+    .pattern(/^[^:]+$/)
+    .default('streamtube'),
+  QUEUE_BACKOFF_DELAY_MS: Joi.number().integer().min(1).default(1000),
+  QUEUE_ENQUEUE_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  VIDEO_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(1),
 });

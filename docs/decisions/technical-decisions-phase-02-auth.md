@@ -238,6 +238,10 @@ _Subprojects in scope:_
 
 **Decision:** A (@nestjs/throttler)
 
+**Revisions:**
+- 2026-11-04 — Effective scope clarified: the `ThrottlerGuard` registered as `APP_GUARD` inside `AuthModule` applies to every route of the application (APP_GUARD providers are global regardless of the host module); controllers outside auth opt out with `@SkipThrottle()` — first case `VideosController`, per `phase-03-videos/TD-10`. No code change. Rationale: the Recommendation's "`AuthModule` only via module-level `APP_GUARD`" described the intent, not the runtime behavior — Nest registers every `APP_GUARD` provider as a global guard whichever module declares it, so the `ttl: 60000, limit: 10` throttler already covers all routes; recording the effective policy here keeps the inherited text truthful for Phases 04+, where every new controller outside auth starts throttled unless it opts out (the root `AppController` already carries `@SkipThrottle()` as a defensive exemption added in Phase 02; `VideosController` is the first feature controller that needs it).
+- 2026-11-04 — Correction to the previous entry: `AppController` already opted out with `@SkipThrottle()` in Phase 02; `VideosController` is the first feature controller to opt out. Rationale: the previous entry's "first case" wording contradicted the existing code (`nestjs-project/src/app.controller.ts`).
+
 ---
 
 ## TD-09: Refresh Token Format

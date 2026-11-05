@@ -14,6 +14,9 @@
 @confirmationToken = <token do e-mail de confirmacao>
 @resetToken = <token do e-mail de reset>
 
+# Vídeo criado em "POST /videos" (capturado automaticamente via @name createVideo)
+@publicId = {{createVideo.response.body.$.public_id}}
+
 
 ###
 # ─────────────────────────────────────────────
@@ -118,3 +121,56 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS (exigem access token; só o dono do vídeo é atendido)
+# ─────────────────────────────────────────────
+
+### 10. Iniciar upload — cria o vídeo em draft e devolve uma URL PUT pré-assinada por parte de 64 MiB (201)
+# @name createVideo
+POST {{baseUrl}}/videos
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "file_name": "ferias.mp4",
+  "file_size": 1048576,
+  "content_type": "video/mp4",
+  "title": "Férias"
+}
+
+
+### 11. Enviar a parte 1 direto ao storage (a API não recebe os bytes)
+# A URL é assinada com S3_PUBLIC_ENDPOINT. Com o valor do .env.example (http://minio:9000),
+# ela só é alcançável de dentro da rede Docker. Troque ./video.mp4 por um arquivo local
+# com exatamente o file_size declarado acima.
+PUT {{createVideo.response.body.$.parts[0].url}}
+
+< ./video.mp4
+
+
+### 12. Status do vídeo (draft → processing → ready | failed)
+GET {{baseUrl}}/videos/{{publicId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 13. Retomar upload — lista as partes recebidas e assina de novo só as que faltam
+GET {{baseUrl}}/videos/{{publicId}}/upload
+Authorization: Bearer {{accessToken}}
+
+
+### 14. Concluir upload — monta o original e enfileira o processamento (202)
+POST {{baseUrl}}/videos/{{publicId}}/upload/complete
+Authorization: Bearer {{accessToken}}
+
+
+### 15. URL de streaming (só para vídeos ready)
+GET {{baseUrl}}/videos/{{publicId}}/stream
+Authorization: Bearer {{accessToken}}
+
+
+### 16. URL de download com o nome original do arquivo (só para vídeos ready)
+GET {{baseUrl}}/videos/{{publicId}}/download
+Authorization: Bearer {{accessToken}}
