@@ -10,21 +10,23 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express) and the video worker (same codebase, entrypoint `src/worker/main.ts`). Contains modules for auth, users, channels, videos, storage and queue.
+- `next-frontend/` — Frontend (Next.js 16, App Router, BFF Route Handlers under `app/api/**`). Delivers the base configuration and the auth screens (Phases 01–02); the video interface belongs to future phases.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
 
 ## Architecture (C4 Container Diagram)
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Frontend** (Next.js) → calls the API via REST (through its BFF Route Handlers); uploads video parts and streams media directly from Object Storage on presigned URLs
+- **API** (Nest.js) → business rules, auth, reads/writes DB, presigns storage URLs and completes multipart uploads, publishes jobs to the queue, sends emails
+- **Video Worker** (Nest.js + FFmpeg; same NestJS codebase, entrypoint `src/worker/main.ts`) → consumes jobs from the queue, probes videos and generates thumbnails, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (Redis + BullMQ) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+Video bytes never pass through the API: uploads use S3 multipart with presigned part URLs (the client `PUT`s each part straight to the storage), and streaming/download use presigned `GET` URLs returned as JSON. The API only handles the control calls (initiate, resume, complete, request stream/download URLs).
 
 ## Docker Networking
 
