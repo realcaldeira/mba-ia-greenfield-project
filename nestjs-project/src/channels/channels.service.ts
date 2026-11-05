@@ -1,25 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource } from 'typeorm';
+import { isUniqueViolation } from '../database/pg-errors';
 import { appendRandomSuffix, sanitizeNickname } from './nickname.util';
 import { Channel } from './entities/channel.entity';
 
-const PG_UNIQUE_VIOLATION = '23505';
 const NICKNAME_COLUMN = 'nickname';
 const MAX_RETRIES = 5;
-
-function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
-  if (!(err instanceof QueryFailedError)) return false;
-  const e = err as any;
-  return (
-    e.code === PG_UNIQUE_VIOLATION &&
-    typeof e.detail === 'string' &&
-    e.detail.includes(column)
-  );
-}
+const INSERT_SAVEPOINT = 'channel_insert';
 
 @Injectable()
 export class ChannelsService {
   constructor(private readonly dataSource: DataSource) {}
+
+  async findByUserId(userId: string): Promise<Channel | null> {
+    return this.dataSource
+      .getRepository(Channel)
+      .findOne({ where: { user_id: userId } });
+  }
 
   async createChannel(userId: string, email: string): Promise<Channel> {
     const baseNickname = sanitizeNickname(email.split('@')[0]);
@@ -36,16 +33,22 @@ export class ChannelsService {
           continue;
         }
 
+        // A failed statement aborts the whole Postgres transaction; the savepoint
+        // lets the next attempt run after a unique violation.
+        await manager.query(`SAVEPOINT ${INSERT_SAVEPOINT}`);
         try {
-          return await manager.save(
+          const saved = await manager.save(
             manager.create(Channel, {
               name: baseNickname,
               nickname,
               user_id: userId,
             }),
           );
+          await manager.query(`RELEASE SAVEPOINT ${INSERT_SAVEPOINT}`);
+          return saved;
         } catch (err) {
-          if (isPgUniqueViolationOnColumn(err, NICKNAME_COLUMN)) {
+          await manager.query(`ROLLBACK TO SAVEPOINT ${INSERT_SAVEPOINT}`);
+          if (isUniqueViolation(err, { column: NICKNAME_COLUMN })) {
             // Concurrent insert between pre-check and save — retry with new suffix
             nickname = appendRandomSuffix(baseNickname);
           } else {
